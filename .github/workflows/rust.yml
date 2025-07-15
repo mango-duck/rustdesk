@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-C target-cpu=native"
+  VCPKG_DEFAULT_TRIPLET: "x64-windows-static"  # 关键修复点
 
 jobs:
   build-windows:
@@ -23,40 +24,46 @@ jobs:
         with:
           submodules: recursive
 
+      # 修复1：完整安装vcpkg和依赖库
+      - name: Setup vcpkg
+        shell: powershell
+        run: |
+          git clone https://github.com/microsoft/vcpkg
+          .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          echo "VCPKG_ROOT=$((Resolve-Path .\vcpkg).Path)" >> $env:GITHUB_ENV
+          echo "$((Resolve-Path .\vcpkg).Path)\installed\x64-windows-static\bin" >> $env:GITHUB_PATH
+
+      # 修复2：安装必要的多媒体库
       - name: Install dependencies
         shell: powershell
         run: |
-          choco install -y windows-sdk-10.1
-          if (-not (Test-Path env:VCPKG_ROOT)) {
-            git clone https://github.com/microsoft/vcpkg
-            .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-            $vcpkgPath = (Resolve-Path .\vcpkg).Path
-            echo "VCPKG_ROOT=$vcpkgPath" >> $env:GITHUB_ENV
-            echo "$vcpkgPath\installed\x64-windows\bin" >> $env:GITHUB_PATH
-          }
+          .\vcpkg\vcpkg install opus:x64-windows-static vpx:x64-windows-static libyuv:x64-windows-static
+          choco install -y windows-sdk-10.1 llvm --force --no-progress
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+          components: rust-src
 
+      # 修复3：显式设置链接路径
       - name: Build agent
         working-directory: ./agent_src
         shell: powershell
         env:
-          VCPKGRS_DYNAMIC: 1
-          TARGET: ${{ matrix.target }}  # 关键修复点
+          VCPKGRS_DYNAMIC: 0  # 强制静态链接
+          RUSTFLAGS: "-C target-feature=+crt-static"
         run: |
-          cargo build --release --target $env:TARGET --features "default"
-          if (Test-Path "./target/$env:TARGET/release/rustdesk.exe") {
-            & "C:\msys64\usr\bin\strip.exe" "./target/$env:TARGET/release/rustdesk.exe" *>$null
+          cargo build --release --target ${{ matrix.target }} --features "default"
+          if (Test-Path "./target/${{ matrix.target }}/release/rustdesk.exe") {
+            & "C:\msys64\usr\bin\strip.exe" "./target/${{ matrix.target }}/release/rustdesk.exe" *>$null
           }
 
       - name: Package artifacts
         shell: powershell
         run: |
           New-Item -ItemType Directory -Path "release" -Force
-          Copy-Item "./target/$env:TARGET/release/rustdesk.exe" "./release/agent.exe"
+          Copy-Item "./agent_src/target/${{ matrix.target }}/release/rustdesk.exe" "./release/agent.exe"
           Copy-Item -Recurse "./images" "./release/"
           & "7z" a -tzip "rustdesk-lite-$env:run_number.zip" "./release/*"
 
