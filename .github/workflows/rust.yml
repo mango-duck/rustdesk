@@ -8,7 +8,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  VCPKG_ROOT: ${{ github.workspace }}/vcpkg  # 关键修复点
   RUSTFLAGS: "-C target-cpu=native"
 
 jobs:
@@ -24,20 +23,24 @@ jobs:
         with:
           submodules: recursive
 
-      # 修复1：安装vcpkg并配置环境
+      # 修复1：使用纯Windows路径格式安装vcpkg
       - name: Setup vcpkg
+        shell: cmd
+        run: |
+          git clone https://github.com/microsoft/vcpkg
+          cd vcpkg
+          bootstrap-vcpkg.bat -disableMetrics
+          echo VCPKG_ROOT=%cd%>>%GITHUB_ENV%
+          echo VCPKG_DISABLE_METRICS=1>>%GITHUB_ENV%
+          echo "::add-path::%cd%\installed\x64-windows\bin"
+
+      # 修复2：使用Chocolatey安装必要组件
+      - name: Install dependencies
         shell: powershell
         run: |
-          git clone https://github.com/microsoft/vcpkg.git
-          .\vcpkg\bootstrap-vcpkg.bat
-          echo "${{ github.workspace }}/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      # 修复2：安装Windows SDK和必要组件
-      - name: Install dependencies
-        run: |
           choco install -y windows-sdk-10.1
-          choco install -y llvm  # magnum-opus可能需要LLVM
+          choco install -y llvm --version=16.0.6
+          refreshenv
 
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
@@ -45,42 +48,43 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
-          components: rust-src  # 部分音频处理依赖需要源码
+          components: rust-src
 
       - name: Cache dependencies
         uses: actions/cache@v3
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            ~\.cargo\registry
+            ~\.cargo\git
             target
-            vcpkg/installed  # 缓存vcpkg编译结果
+            vcpkg\installed
           key: ${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
-      # 修复3：显式设置vcpkg工具链
-      - name: Configure vcpkg
+      # 修复3：显式设置环境变量（Windows格式）
+      - name: Configure environment
+        shell: cmd
         run: |
-          echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
-          echo "$VCPKG_ROOT/installed/x64-windows/bin" >> $GITHUB_PATH
+          echo "VCPKGRS_DYNAMIC=1" >> %GITHUB_ENV%
+          echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$(where cl.exe)" >> %GITHUB_ENV%
 
       - name: Build agent
         working-directory: ./agent_src
-        env:
-          VCPKGRS_DYNAMIC: 1  # 强制动态链接
+        shell: cmd
         run: |
-          cargo build --release --target ${{ matrix.target }} --features "default"
-          if [ -f "./target/${{ matrix.target }}/release/rustdesk.exe" ]; then
-            strip ./target/${{ matrix.target }}/release/rustdesk.exe || true
-          fi
+          cargo build --release --target %matrix.target% --features "default"
+          if exist "target\%matrix.target%\release\rustdesk.exe" (
+            strip target\%matrix.target%\release\rustdesk.exe || echo "Strip failed but continuing"
+          )
 
       - name: Package artifacts
+        shell: cmd
         run: |
-          mkdir -p release
-          cp ./agent_src/target/${{ matrix.target }}/release/rustdesk.exe ./release/agent.exe
-          cp -r ./images ./release/
-          7z a -tzip rustdesk-lite-${{ github.run_number }}.zip ./release/*
+          mkdir release
+          copy /Y "agent_src\target\%matrix.target%\release\rustdesk.exe" "release\agent.exe"
+          xcopy /E /Y images release\images
+          7z a -tzip rustdesk-lite-%RUN_NUMBER%.zip release\*
 
       - uses: actions/upload-artifact@v4
         with:
           name: rustdesk-windows-${{ matrix.target }}
-          path: rustdesk-lite-${{ github.run_number }}.zip
+          path: rustdesk-lite-*.zip
