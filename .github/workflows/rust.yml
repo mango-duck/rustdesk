@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg  # 关键修复点
   RUSTFLAGS: "-C target-cpu=native"
 
 jobs:
@@ -23,12 +24,28 @@ jobs:
         with:
           submodules: recursive
 
+      # 修复1：安装vcpkg并配置环境
+      - name: Setup vcpkg
+        shell: powershell
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git
+          .\vcpkg\bootstrap-vcpkg.bat
+          echo "${{ github.workspace }}/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # 修复2：安装Windows SDK和必要组件
+      - name: Install dependencies
+        run: |
+          choco install -y windows-sdk-10.1
+          choco install -y llvm  # magnum-opus可能需要LLVM
+
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
+          components: rust-src  # 部分音频处理依赖需要源码
 
       - name: Cache dependencies
         uses: actions/cache@v3
@@ -37,18 +54,24 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            vcpkg/installed  # 缓存vcpkg编译结果
+          key: ${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install Windows SDK (推荐方案)
+      # 修复3：显式设置vcpkg工具链
+      - name: Configure vcpkg
         run: |
-          choco install -y windows-sdk-10.1
-          echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64" >> $GITHUB_PATH
+          echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
+          echo "$VCPKG_ROOT/installed/x64-windows/bin" >> $GITHUB_PATH
 
       - name: Build agent
         working-directory: ./agent_src
+        env:
+          VCPKGRS_DYNAMIC: 1  # 强制动态链接
         run: |
           cargo build --release --target ${{ matrix.target }} --features "default"
-          strip ./target/${{ matrix.target }}/release/rustdesk.exe || true  # 可选：减小二进制体积
+          if [ -f "./target/${{ matrix.target }}/release/rustdesk.exe" ]; then
+            strip ./target/${{ matrix.target }}/release/rustdesk.exe || true
+          fi
 
       - name: Package artifacts
         run: |
