@@ -23,7 +23,6 @@ jobs:
         with:
           submodules: recursive
 
-      # 安装依赖项
       - name: Install dependencies
         shell: powershell
         run: |
@@ -36,30 +35,29 @@ jobs:
             echo "$vcpkgPath\installed\x64-windows\bin" >> $env:GITHUB_PATH
           }
 
-      # 设置Rust工具链
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      # 构建步骤
       - name: Build agent
         working-directory: ./agent_src
+        shell: powershell
         env:
           VCPKGRS_DYNAMIC: 1
         run: |
-          cargo build --release --target ${{ matrix.target }} --features "default"
-          if [ -f "./target/${{ matrix.target }}/release/rustdesk.exe" ]; then
-            strip ./target/${{ matrix.target }}/release/rustdesk.exe || true
-          fi
+          cargo build --release --target $env:matrix_target --features "default"
+          if (Test-Path "./target/$env:matrix_target/release/rustdesk.exe") {
+            & "C:\msys64\usr\bin\strip.exe" "./target/$env:matrix_target/release/rustdesk.exe" *>$null
+          }
 
-      # 打包产物
       - name: Package artifacts
+        shell: powershell
         run: |
-          mkdir -p release
-          cp ./agent_src/target/${{ matrix.target }}/release/rustdesk.exe ./release/agent.exe
-          cp -r ./images ./release/
-          7z a -tzip rustdesk-lite-${{ github.run_number }}.zip ./release/*
+          New-Item -ItemType Directory -Path "release" -Force
+          Copy-Item "./agent_src/target/$env:matrix_target/release/rustdesk.exe" "./release/agent.exe"
+          Copy-Item -Recurse "./images" "./release/"
+          & "7z" a -tzip "rustdesk-lite-$env:run_number.zip" "./release/*"
 
       - uses: actions/upload-artifact@v4
         with:
