@@ -23,7 +23,35 @@ jobs:
         with:
           submodules: recursive
 
-      # 修复1：使用纯Windows路径格式安装vcpkg
+      # 方案1：跳过LLVM安装（使用系统已有版本）
+      - name: Verify existing LLVM
+        shell: powershell
+        run: |
+          Write-Output "已安装的LLVM版本："
+          clang --version || Write-Output "未找到LLVM"
+          echo "LLVM_PATH=$($(where clang) | Select-Object -First 1 | Split-Path -Parent)" >> $env:GITHUB_ENV
+
+      # 方案2：使用官方安装器替代Chocolatey
+      - name: Install dependencies (Fallback)
+        if: ${{ failure() }}  # 仅在方案1失败时运行
+        shell: powershell
+        run: |
+          # 下载官方LLVM安装器
+          $llvmUrl = "https://github.com/llvm/llvm-project/releases/download/llvmorg-16.0.6/LLVM-16.0.6-win64.exe"
+          Invoke-WebRequest -Uri $llvmUrl -OutFile llvm-installer.exe
+          Start-Process -Wait -FilePath .\llvm-installer.exe -ArgumentList "/S", "ADD_LLVM_TO_PATH=1"
+          Remove-Item llvm-installer.exe
+          refreshenv
+
+      # 修复Chocolatey环境刷新问题
+      - name: Install Windows SDK
+        shell: powershell
+        run: |
+          choco install -y windows-sdk-10.1 --force
+          Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+          Update-SessionEnvironment
+          echo "WindowsSdkDir=$env:WindowsSdkDir" >> $env:GITHUB_ENV
+
       - name: Setup vcpkg
         shell: cmd
         run: |
@@ -31,16 +59,7 @@ jobs:
           cd vcpkg
           bootstrap-vcpkg.bat -disableMetrics
           echo VCPKG_ROOT=%cd%>>%GITHUB_ENV%
-          echo VCPKG_DISABLE_METRICS=1>>%GITHUB_ENV%
-          echo "::add-path::%cd%\installed\x64-windows\bin"
-
-      # 修复2：使用Chocolatey安装必要组件
-      - name: Install dependencies
-        shell: powershell
-        run: |
-          choco install -y windows-sdk-10.1
-          choco install -y llvm --version=16.0.6
-          refreshenv
+          echo ::add-path::%cd%\installed\x64-windows\bin>>%GITHUB_PATH%
 
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
@@ -50,39 +69,19 @@ jobs:
           override: true
           components: rust-src
 
-      - name: Cache dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~\.cargo\registry
-            ~\.cargo\git
-            target
-            vcpkg\installed
-          key: ${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
-
-      # 修复3：显式设置环境变量（Windows格式）
-      - name: Configure environment
-        shell: cmd
-        run: |
-          echo "VCPKGRS_DYNAMIC=1" >> %GITHUB_ENV%
-          echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$(where cl.exe)" >> %GITHUB_ENV%
-
       - name: Build agent
         working-directory: ./agent_src
         shell: cmd
+        env:
+          VCPKGRS_DYNAMIC: 1
+          # 显式指定工具链路径
+          CC: "${{ env.LLVM_PATH }}\clang.exe"
+          CXX: "${{ env.LLVM_PATH }}\clang++.exe"
         run: |
           cargo build --release --target %matrix.target% --features "default"
           if exist "target\%matrix.target%\release\rustdesk.exe" (
-            strip target\%matrix.target%\release\rustdesk.exe || echo "Strip failed but continuing"
+            strip target\%matrix.target%\release\rustdesk.exe || echo "Strip skipped"
           )
-
-      - name: Package artifacts
-        shell: cmd
-        run: |
-          mkdir release
-          copy /Y "agent_src\target\%matrix.target%\release\rustdesk.exe" "release\agent.exe"
-          xcopy /E /Y images release\images
-          7z a -tzip rustdesk-lite-%RUN_NUMBER%.zip release\*
 
       - uses: actions/upload-artifact@v4
         with:
