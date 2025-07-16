@@ -24,40 +24,73 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup vcpkg and dependencies
+      # 修复1：安装完整的多媒体依赖链（强制重新安装）
+      - name: Install dependencies
         shell: powershell
         run: |
+          # 清理旧安装
+          if (Test-Path vcpkg) { Remove-Item -Recurse -Force vcpkg }
+          
+          # 安装最新vcpkg
           git clone https://github.com/microsoft/vcpkg
           .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-          .\vcpkg\vcpkg install libvpx:x64-windows-static libyuv:x64-windows-static
+          
+          # 强制重新安装完整编解码器套件
+          .\vcpkg\vcpkg remove --outdated --recurse
+          .\vcpkg\vcpkg install opus[multistream,float,fixed-point]:x64-windows-static --recurse
+          .\vcpkg\vcpkg install libvpx[core,highbitdepth,multithread,tools]:x64-windows-static --recurse
+          .\vcpkg\vcpkg install libyuv:x64-windows-static
+          
+          # 设置环境变量
           $vcpkgPath = (Resolve-Path .\vcpkg).Path
           echo "VCPKG_ROOT=$vcpkgPath" >> $env:GITHUB_ENV
           echo "$vcpkgPath\installed\x64-windows-static\bin" >> $env:GITHUB_PATH
+          echo "$vcpkgPath\installed\x64-windows-static\include" >> $env:GITHUB_PATH
 
-      - name: Verify installation
+      # 修复2：手动验证并修复头文件位置
+      - name: Fix opus headers
         shell: powershell
         run: |
-          if (-not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows-static\include\vpx\vp8.h")) {
-            Write-Error "VPX headers not found!"
-            exit 1
+          # 确保opus头文件在正确位置
+          $opusInclude = "$env:VCPKG_ROOT\installed\x64-windows-static\include\opus"
+          if (-not (Test-Path "$opusInclude\opus_multistream.h")) {
+              Write-Output "Fixing opus headers location..."
+              New-Item -ItemType Directory -Path $opusInclude -Force
+              Copy-Item "$env:VCPKG_ROOT\installed\x64-windows-static\include\*.h" $opusInclude
           }
 
+          # 验证VPX头文件
+          if (-not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows-static\include\vpx\vp8.h")) {
+              Write-Error "VPX headers still missing!"
+              exit 1
+          }
+
+      # 修复3：设置完整的构建环境
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-          components: rust-src
+          components: rust-src, llvm-tools-preview
 
+      # 修复4：使用定制构建命令
       - name: Build agent
         working-directory: ./agent_src
         shell: powershell
         env:
           VCPKGRS_DYNAMIC: 0
-          C_INCLUDE_PATH: "${{ env.VCPKG_ROOT }}/installed/x64-windows-static/include"
+          C_INCLUDE_PATH: "${{ env.VCPKG_ROOT }}\installed\x64-windows-static\include"
+          LIBRARY_PATH: "${{ env.VCPKG_ROOT }}\installed\x64-windows-static\lib"
+          PKG_CONFIG_PATH: "${{ env.VCPKG_ROOT }}\installed\x64-windows-static\lib\pkgconfig"
         run: |
+          # 先单独构建依赖项
+          cargo build -p magnum-opus --release --target ${{ matrix.target }} --features "static"
+          cargo build -p scrap --release --target ${{ matrix.target }} --features "static-vpx"
+          
+          # 再构建主程序
           cargo build --release --target ${{ matrix.target }} --features "default"
+          
           if (Test-Path "./target/${{ matrix.target }}/release/rustdesk.exe") {
-            & "C:\msys64\usr\bin\strip.exe" "./target/${{ matrix.target }}/release/rustdesk.exe" *>$null
+              & "C:\msys64\usr\bin\strip.exe" "./target/${{ matrix.target }}/release/rustdesk.exe" *>$null
           }
 
       - name: Package artifacts
