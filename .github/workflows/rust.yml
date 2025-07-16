@@ -78,9 +78,9 @@ jobs:
         shell: powershell
         env:
           VCPKGRS_DYNAMIC: 0
-          C_INCLUDE_PATH: "${{ env.VCPKG_ROOT }}\installed\x64-windows-static\include"
-          LIBRARY_PATH: "${{ env.VCPKG_ROOT }}\installed\x64-windows-static\lib"
-          PKG_CONFIG_PATH: "${{ env.VCPKG_ROOT }}\installed\x64-windows-static\lib\pkgconfig"
+          C_INCLUDE_PATH: "${{ env.VCPKG_ROOT }}/installed/x64-windows-static/include"
+          LIBRARY_PATH: "${{ env.VCPKG_ROOT }}/installed/x64-windows-static/lib"
+          PKG_CONFIG_PATH: "${{ env.VCPKG_ROOT }}/installed/x64-windows-static/lib/pkgconfig"
         run: |
           # 先单独构建依赖项
           cargo build -p magnum-opus --release --target ${{ matrix.target }} --features "static"
