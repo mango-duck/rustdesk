@@ -1,4 +1,4 @@
-name: Rust Windows CI
+name: 编译Agent
 
 on:
   push:
@@ -19,40 +19,40 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: stable
         targets: ${{ matrix.target }}
-    
+
     - name: Cache cargo dependencies
       uses: actions/cache@v3
       with:
         path: |
+          agent_src/target
           ~/.cargo/registry
           ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-${{ hashFiles('agent_src/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
-    
+
     - name: Build (Release)
-      env:
-        SERVER_IP: ${{ secrets.SERVER_IP }}  # 传递 Secrets
-      run: cargo build --release --verbose 
-      
+      working-directory: agent_src
+      run: cargo build --release --verbose
+
     - name: Run Tests
-      run: cargo test --verbose 
-      
+      working-directory: agent_src
+      run: cargo test --verbose
+
     - name: Run Integration Tests
-      run: cargo test --release --verbose 
-      
+      working-directory: agent_src
+      run: cargo test --release --verbose
+
     - name: Upload Release Artifacts
       if: matrix.target == 'x86_64-pc-windows-msvc'
       uses: actions/upload-artifact@v4
       with:
         name: release-bin
         path: |
-          target/release/agent.exe
-          target/release/build/
+          agent_src/target/release/agent.exe
