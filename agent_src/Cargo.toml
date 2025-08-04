@@ -61,3 +61,6 @@ opt-level = 'z'
 lto = true
 codegen-units = 1
 
+[build]
+rustflags = ["-C", "link-arg=-Wl,--enable-auto-import"]
+
