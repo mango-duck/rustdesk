@@ -44,7 +44,9 @@ jobs:
 
     - name: Symlink opus include to static path
       run: |
-        New-Item -ItemType Directory -Force -Path .\vcpkg\installed\x64-windows-static
+        if (!(Test-Path .\vcpkg\installed\x64-windows-static)) {
+          New-Item -ItemType Directory -Force -Path .\vcpkg\installed\x64-windows-static
+        }
         cmd /c mklink /D .\vcpkg\installed\x64-windows-static\include .\vcpkg\installed\x64-windows\include
         cmd /c mklink /D .\vcpkg\installed\x64-windows-static\lib .\vcpkg\installed\x64-windows\lib
       shell: pwsh
