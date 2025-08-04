@@ -32,7 +32,6 @@ jobs:
         .\vcpkg\bootstrap-vcpkg.bat
         .\vcpkg\vcpkg.exe install opus:x64-windows
         .\vcpkg\vcpkg.exe install libvpx:x64-windows-static
-        .\vcpkg\vcpkg.exe install yuv:x64-windows-static
       shell: pwsh
 
     - name: Set VCPKG_ROOT
