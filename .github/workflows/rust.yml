@@ -40,7 +40,7 @@ jobs:
     - name: Build (Release)
       env:
         SERVER_IP: ${{ secrets.SERVER_IP }}  # 传递 Secrets
-      run: cargo build --release --verbose -p client
+      run: cargo build --release --verbose 
       
     - name: Run Tests
       run: cargo test --verbose 
