@@ -42,19 +42,13 @@ jobs:
       run: echo "VCPKG_DEFAULT_TRIPLET=x64-windows" >> $env:GITHUB_ENV
       shell: pwsh
 
-    - name: Symlink opus include to static path
+    - name: Copy opus/libvpx include/lib to static path
       run: |
         if (!(Test-Path .\vcpkg\installed\x64-windows-static)) {
           New-Item -ItemType Directory -Force -Path .\vcpkg\installed\x64-windows-static
         }
-        if (Test-Path .\vcpkg\installed\x64-windows-static\include) {
-          Remove-Item .\vcpkg\installed\x64-windows-static\include -Force -Recurse
-        }
-        if (Test-Path .\vcpkg\installed\x64-windows-static\lib) {
-          Remove-Item .\vcpkg\installed\x64-windows-static\lib -Force -Recurse
-        }
-        cmd /c mklink /D .\vcpkg\installed\x64-windows-static\include .\vcpkg\installed\x64-windows\include
-        cmd /c mklink /D .\vcpkg\installed\x64-windows-static\lib .\vcpkg\installed\x64-windows\lib
+        Copy-Item -Recurse -Force .\vcpkg\installed\x64-windows\include .\vcpkg\installed\x64-windows-static\
+        Copy-Item -Recurse -Force .\vcpkg\installed\x64-windows\lib .\vcpkg\installed\x64-windows-static\
       shell: pwsh
 
     - name: Install LLVM for bindgen
